@@ -1,0 +1,6 @@
+openslide-python
+opencv-python
+scikit-image
+numpy
+bitarray
+bitarray-hardbyte
