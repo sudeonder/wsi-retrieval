@@ -44,6 +44,7 @@ def tile_wsi_if_occupied(
 
             occ = calculate_occupancy(patch_np, threshold=0.8)
             if occ < patch_occupancy_threshold:
+                total_patches += 1
                 continue  # Skip low-content (white) patches
 
             # Resize and save
