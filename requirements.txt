@@ -4,3 +4,4 @@ scikit-image
 numpy
 bitarray
 bitarray-hardbyte
+python-dotenv
