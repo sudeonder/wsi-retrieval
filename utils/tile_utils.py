@@ -7,13 +7,6 @@ import openslide
 def calculate_occupancy(patch, threshold=0.8):
     """
     Calculate the occupancy of a patch based on non-white pixel content.
-
-    Args:
-        patch (np.array): RGB image patch.
-        threshold (float): Pixel intensity threshold to consider as 'white'.
-
-    Returns:
-        float: Occupancy ratio (0.0 to 1.0), where 1.0 means fully non-white.
     """
     gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
     _, binary = cv2.threshold(gray, int(threshold * 255), 255, cv2.THRESH_BINARY)
@@ -31,15 +24,7 @@ def tile_wsi_if_occupied(
 ):
     """
     Tiles a WSI and saves patches above the occupancy threshold.
-
-    Args:
-        wsi_path (Path): Path to the input WSI file.
-        output_dir (Path): Directory to save extracted patches.
-        patch_occupancy_threshold (float): Min. ratio of non-white pixels.
-        patch_size (int): Patch size to extract at original resolution.
-        stride (int): Stride for sliding window.
-        resize_dim (int): Resize dimension (typically for downsampling).
-        level (int): Level of the WSI pyramid to read from.
+    Returns metadata for each saved tile for use in dataset.csv.
     """
     slide = openslide.OpenSlide(str(wsi_path))
     width, height = slide.level_dimensions[level]
@@ -48,6 +33,7 @@ def tile_wsi_if_occupied(
     output_dir = output_dir / basename
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    dataset_records = []
     total_patches = 0
     saved_patches = 0
 
@@ -64,11 +50,19 @@ def tile_wsi_if_occupied(
             patch_resized = cv2.resize(patch_np, (resize_dim, resize_dim), interpolation=cv2.INTER_AREA)
             patch_img = Image.fromarray(patch_resized)
 
-            tile_name = f"{x}_{y}.png"
+            tile_name = f"x{x}_y{y}.png"
             patch_img.save(output_dir / tile_name)
-            saved_patches += 1
 
+            dataset_records.append({
+                "x": x,
+                "y": y,
+                "tile_filename": tile_name
+            })
+
+            saved_patches += 1
             total_patches += 1
 
-    print(f"✅ Done: {saved_patches} / {total_patches} patches saved for {basename}")
     slide.close()
+    print(f"✅ Done: {saved_patches} / {total_patches} patches saved for {basename}")
+
+    return dataset_records
