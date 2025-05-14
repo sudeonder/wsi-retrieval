@@ -5,20 +5,23 @@ from PIL import Image, ImageDraw
 import openslide
 import json
 
-def calculate_occupancy(patch: np.ndarray, use_otsu=True, threshold=0.8):
+def calculate_occupancy(patch: np.ndarray, min_saturation: int = 15):
     """
-    Calculate the tissue occupancy of a patch.
-    If use_otsu is True, applies Otsu thresholding. Otherwise uses a fixed threshold.
+    Estimate tissue occupancy using the HSV saturation channel.
+    Keeps pale pink tissue with low brightness but detectable color.
+
+    Parameters:
+    - patch: RGB image as numpy array
+    - min_saturation: pixels with S > this value are considered tissue
+
+    Returns:
+    - occupancy: fraction of tissue-colored pixels
     """
-    gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
-
-    if use_otsu:
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    else:
-        _, binary = cv2.threshold(gray, int(threshold * 255), 255, cv2.THRESH_BINARY)
-
-    foreground_fraction = 1.0 - (np.sum(binary == 255) / binary.size)
-    return foreground_fraction
+    hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+    saturation = hsv[:, :, 1]  # S channel
+    tissue_mask = saturation > min_saturation
+    occupancy = np.sum(tissue_mask) / tissue_mask.size
+    return occupancy
 
 
 def tile_wsi_if_occupied(
@@ -29,14 +32,13 @@ def tile_wsi_if_occupied(
     stride: int = 448,
     resize_dim: int = 224,
     level: int = 0,
-    use_otsu: bool = True,
+    min_saturation: int = 15,
     generate_thumbnail: bool = True,
     debug: bool = False,
 ):
     """
-    Tiles a WSI and saves patches above a tissue occupancy threshold.
-    Returns a list of metadata dicts for each saved patch.
-    Also generates a thumbnail visualizing saved patch locations.
+    Tiles a WSI and saves patches with sufficient saturation-based tissue occupancy.
+    Saves metadata and thumbnail for each WSI.
     """
     slide = openslide.OpenSlide(str(wsi_path))
     width, height = slide.level_dimensions[level]
@@ -49,7 +51,6 @@ def tile_wsi_if_occupied(
     total_patches = 0
     saved_patches = 0
 
-    # Create thumbnail for debug/visualization
     if generate_thumbnail:
         thumb = slide.get_thumbnail((width // 32, height // 32)).convert("RGB")
         draw = ImageDraw.Draw(thumb)
@@ -61,16 +62,14 @@ def tile_wsi_if_occupied(
             patch = slide.read_region((x, y), level, (patch_size, patch_size)).convert("RGB")
             patch_np = np.array(patch)
 
-            occ = calculate_occupancy(patch_np, use_otsu, threshold=0.8)
+            occ = calculate_occupancy(patch_np, min_saturation=min_saturation)
 
             if occ < patch_occupancy_threshold:
                 total_patches += 1
                 continue
 
-            # Resize and save
             patch_resized = cv2.resize(patch_np, (resize_dim, resize_dim), interpolation=cv2.INTER_AREA)
             patch_img = Image.fromarray(patch_resized)
-
             tile_name = f"x{x}_y{y}.png"
             patch_img.save(output_dir / tile_name)
 
@@ -81,6 +80,7 @@ def tile_wsi_if_occupied(
                 "occupancy": occ,
                 "saved": True
             })
+
             saved_coords.append((x, y))
             saved_patches += 1
             total_patches += 1
@@ -90,11 +90,9 @@ def tile_wsi_if_occupied(
 
     slide.close()
 
-    # Save metadata
     with open(output_dir / "metadata.json", "w") as f:
         json.dump(dataset_records, f, indent=2)
 
-    # Save thumbnail with overlay
     if generate_thumbnail and saved_coords:
         box_size = int(patch_size * scale_x)
         for x, y in saved_coords:
